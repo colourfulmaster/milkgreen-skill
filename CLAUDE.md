@@ -8,9 +8,11 @@
 - **硬件**:Mac mini M4 / 16GB RAM
 - **主语言**:Python
 - **已装本地工具**:
-  - whisper.cpp + ggml-large-v3-turbo 模型(批量 ASR)
+  - whisper.cpp(brew 安装,主程序在 `/opt/homebrew/bin/whisper-cli` — **注意:不是 roadmap 文档里写的 `./main`**;还有 whisper-server / whisper-stream 等套件)
+  - ggml-large-v3-turbo 模型(已下载,**3 个副本**:`~/whisper.cpp/models/`、`~/whisper-models/`、`~/openclaw-stt-server/whisper-models/`,后续可清理重复)
+  - ffmpeg 8.1(`/opt/homebrew/bin/ffmpeg`)
   - OpenClaw(生产环境在 `~/.openclaw/`,**不要主动碰**;开发用项目本地)
-  - FastAPI 服务(端口 18900,语音克隆阶段在此服务上扩展 TTS 接口)
+  - FastAPI 服务(端口 18900)
 - **AI API**:DeepSeek v4(通过 OpenClaw)、Gemini Vision、Claude API
 
 ## 项目路线(参考 `~/Downloads/streamer-style-clone-roadmap.md`)
@@ -22,9 +24,10 @@
 3. **文本清洗** — 去重 / 合并碎片 / 保留风格语气词 / 标点修正 / 弹幕-语音配对 / 场景分类
 4. **风格分析(核心)** — LLM 多维提炼(口头禅/语气/句式/称呼/互动/情绪/转场/讲解/节奏)+ 跨场次汇总 + few-shot 示例库
 5. **部署到 OpenClaw** — SOUL.md 直接写入 或 Skill 动态检索
-6. **(可选)语音克隆** — Bert-VITS2 + Demucs 分离
 
-第 6 阶段风险最大,放最后,前 5 跑通了再说。
+~~6. (可选)语音克隆 — Bert-VITS2 + Demucs 分离~~ ← **2026-05-09 拍板:跳过,前 5 阶段闭环就够**
+
+5 阶段闭环,每阶段独立可测试,完成一个再进入下一个。
 
 ## 协作风格(初级开发者)
 
@@ -41,6 +44,7 @@
 - 每个函数写简短中文 docstring,新手回看能看懂
 - 提交信息用中文,格式 `类型: 做了什么`,如 `feat: 添加 yt-dlp 批量下载脚本`
 - 配置走 `config.yaml`(路径 / 模型参数);secrets 走 `.env`
+- **Python 环境用 venv 隔离**(`.venv/` 在 .gitignore);每次进项目执行 `source .venv/bin/activate`
 
 ## AI 协作的工程纪律
 
@@ -101,11 +105,10 @@ milkGreenSoul/
 | 3 文本清洗 | 去重率 ≥ 95%,场景分类抽样准确率 ≥ 80% |
 | 4 风格分析 | 跨场次稳定特征提炼出来(3+ 场次出现的才算稳) |
 | 5 OpenClaw 部署 | 20 条测试输入,口头禅+语气+互动还原度 ≥ 4 分(满分 5) |
-| 6 语音克隆 | 合成语音可辨识,情绪基本传达到 |
 
 ## 实施顺序(严格)
 
-按 roadmap 文档的"实施顺序建议":**先跑通最小闭环**(1 个录像走完 1-2 阶段)→ 再批量 → 再做文本处理 → 再做风格分析 → 最后部署验证。**语音克隆放最后**。
+按 roadmap 文档的"实施顺序建议":**先跑通最小闭环**(1 个录像走完 1-2 阶段)→ 再批量 → 再做文本处理 → 再做风格分析 → 最后部署验证。
 
 ## 项目状态(2026-05-09)
 

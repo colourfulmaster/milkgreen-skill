@@ -27,8 +27,22 @@
 | 3 | 文本清洗 + 弹幕配对 + 场景分类 | — |
 | 4 | LLM 风格分析(核心) + few-shot 库 | — |
 | 5 | 部署到 OpenClaw(SOUL.md 或 Skill) | — |
-| 6 | (可选)Bert-VITS2 语音克隆 | — |
+
+## 开发环境
+
+本项目用 venv 隔离 Python 依赖。
+
+```bash
+# 第一次创建(已建过则跳过)
+python3 -m venv .venv
+
+# 每次进项目激活
+source .venv/bin/activate
+
+# 安装依赖
+pip install -r requirements.txt
+```
 
 ## 状态
 
-- **2026-05-09**:项目骨架初始化
+- **2026-05-09**:项目骨架初始化,venv + yt-dlp 已配置
