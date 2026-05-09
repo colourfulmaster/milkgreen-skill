@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.python-version
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# 项目数据(大文件,不入 git)
+data/raw_videos/
+data/audio/
+data/transcripts/
+data/danmaku/
+data/cleaned/
+data/analysis/
+data/
+
+# 环境变量与 API key
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# 模型权重(若放本项目内)
+models/
+*.bin
+*.ckpt
+*.pth
+*.safetensors
+
+# OpenClaw 生产环境(永远不入此项目 git)
+.openclaw/
+
+# Bert-VITS2 / Demucs 临时文件
+separated/
+*.wav
+!output/*.wav
+
+# 系统 / 编辑器
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+Thumbs.db
+
+# 日志
+*.log
+logs/
+
+# 输出中间产物(保留 SOUL_persona.md / examples.yaml)
+output/*.tmp
+output/*.bak
