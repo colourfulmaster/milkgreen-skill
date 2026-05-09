@@ -11,7 +11,7 @@ env/
 .mypy_cache/
 
 # 项目数据(大文件,不入 git)
-data/raw_videos/
+data/raw_media/
 data/audio/
 data/transcripts/
 data/danmaku/

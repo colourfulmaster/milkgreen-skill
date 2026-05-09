@@ -6,7 +6,7 @@
     python3 scripts/download.py --file urls.txt
 
 输出:
-    data/raw_videos/{上传日期}_{平台}_{标题}.{ext}
+    data/raw_media/{上传日期}_{平台}_{标题}.{ext}
     同名 .info.json(含元信息:标题/上传者/时长 等)
 
 特性:
@@ -22,7 +22,7 @@ from pathlib import Path
 import yt_dlp
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-OUTPUT_DIR = PROJECT_ROOT / "data" / "raw_videos"
+OUTPUT_DIR = PROJECT_ROOT / "data" / "raw_media"
 
 
 def parse_args() -> argparse.Namespace:

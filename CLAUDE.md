@@ -61,7 +61,7 @@
 - **不写 API key 到代码里** — 所有 key(DeepSeek / Gemini / Claude / B 站等)走 `.env`,且 `.env` 必须在 `.gitignore`
 - **不擅自 `rm -rf` / `git reset --hard` / `git push --force`** — 这类操作先问我
 - **不主动碰 `~/.openclaw/`** — 那是 OpenClaw 生产环境;开发用项目本地的 SOUL.md / Skill 草稿
-- **大文件不入 git** — `data/raw_videos/`、`data/audio/` 等动辄 GB,严禁 commit
+- **大文件不入 git** — `data/raw_media/`、`data/audio/` 等动辄 GB,严禁 commit
 - **慎用长时任务** — ffmpeg 批量、whisper.cpp 大批量、demucs、Bert-VITS2 训练,提前确认
 - **尊重平台 ToS** — yt-dlp 只下载自己有权访问的内容(订阅/购买/已授权的回放)
 - **风格分析的原始转录文本含 PII**(粉丝弹幕用户名等)— 公开任何中间产物前先脱敏
@@ -85,7 +85,7 @@ milkGreenSoul/
 │   ├── analyze_style.py       # LLM 风格分析(核心)
 │   └── build_examples.py      # few-shot 示例库
 ├── data/                      ← 大文件,gitignore
-│   ├── raw_videos/
+│   ├── raw_media/             # 下载的音频(m4a),沿用 roadmap 路径但实际是音频
 │   ├── audio/
 │   ├── transcripts/
 │   ├── danmaku/
