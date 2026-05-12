@@ -1,144 +1,153 @@
 #!/usr/bin/env python3
-"""阶段 3:批量调用 whisper-cli 转录,合并段。
+"""阶段 3:用 SenseVoice 批量转录(分块处理避 OOM)。
 
 输入:
     data/audio/{stem}/seg_NNN.wav
 
 输出:
-    data/transcripts/{stem}/seg_NNN.json   ← 单段原始转录(whisper-cli 直出)
-    data/transcripts/{stem}.json           ← 合并后(段索引×段长 加偏移)
+    data/transcripts/{stem}.json
 
-合并后 JSON 结构(下游清洗用):
-    {
-        "stem": "...",
-        "duration_seconds": 7216.0,
-        "segment_count": 5,
-        "segments": [
-            {"start": 0.0, "end": 3.5, "text": "..."},
-            {"start": 3.8, "end": 7.2, "text": "..."}
-        ]
-    }
+SenseVoice:
+    - 单段全文(含 <|zh|><|BGM|> 等 token,本脚本自动剥离)
+    - 无时间戳
+    - 每段 WAV 切成 60s 子块逐一推理避 OOM,再拼接
+    - 速度 ~40× 实时,远快于 whisper
 
 跳过策略:
-    单段:目标 .json 已存在 → 跳过该段(支持断点续跑)
-    合并:每次都重新合并(几秒钟,不影响)
+    输出 JSON 已存在 → 跳过该 stem
 """
 
 import json
+import math
+import os
+import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+
+from funasr import AutoModel
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 INPUT_DIR = PROJECT_ROOT / "data" / "audio"
 OUTPUT_DIR = PROJECT_ROOT / "data" / "transcripts"
+TMP_DIR = PROJECT_ROOT / ".tmp_transcribe"
 
-WHISPER_CLI = "whisper-cli"
-MODEL_PATH = Path.home() / "whisper.cpp" / "models" / "ggml-large-v3-turbo.bin"
-LANGUAGE = "zh"
-MAX_LEN = 50               # 单条 transcription 最大字符,避免巨长段
-SEGMENT_DURATION = 1800    # 与 extract_audio 一致(30 分钟)
-THREADS = 8                # M4 物理核
+SENSE_TOKEN_RE = re.compile(r"<\|[^|]+\|>")
+CHUNK_SECONDS = 60  # 每次推理 60s 音频(~10MB WAV),M4 16GB 稳定
 
 
-def transcribe_one_segment(wav_path: Path, out_dir: Path) -> Path:
-    """转录单段 wav,产出 same_basename.json。返回 JSON 路径。
-
-    whisper-cli 用 -of 指定输出基名(不带扩展名),-oj 写 .json
-    """
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_basename = out_dir / wav_path.stem
-    out_json = out_dir / f"{wav_path.stem}.json"
-
-    if out_json.exists() and out_json.stat().st_size > 0:
-        print(f"  [skip] {wav_path.name} → {out_json.name}")
-        return out_json
-
-    cmd = [
-        WHISPER_CLI,
-        "-m", str(MODEL_PATH),
-        "-l", LANGUAGE,
-        "-t", str(THREADS),
-        "-ml", str(MAX_LEN),
-        "-oj",
-        "-of", str(out_basename),
-        "-np",
-        "-f", str(wav_path),
-    ]
-
-    print(f"  [run]  {wav_path.name}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"ERROR: whisper-cli 返回码 {result.returncode}", file=sys.stderr)
-        print("--- stderr (尾部 2000 字符) ---", file=sys.stderr)
-        print(result.stderr[-2000:], file=sys.stderr)
-        sys.exit(1)
-
-    if not out_json.exists():
-        print(f"ERROR: 期望的 {out_json} 没生成", file=sys.stderr)
-        print("--- stderr (尾部 2000 字符) ---", file=sys.stderr)
-        print(result.stderr[-2000:], file=sys.stderr)
-        sys.exit(1)
-
-    size_kb = out_json.stat().st_size / 1024
-    print(f"         → {out_json.name} ({size_kb:.1f} KB)")
-    return out_json
+def strip_tokens(text: str) -> str:
+    return SENSE_TOKEN_RE.sub("", text).strip()
 
 
-def merge_segments(stem_dir: Path) -> dict:
-    """合并子目录下所有 seg_NNN.json,加时间戳偏移。
+def build_model() -> AutoModel:
+    print(f"[init] 加载模型: iic/SenseVoiceSmall...")
+    return AutoModel(model="iic/SenseVoiceSmall", device="cpu", disable_update=True)
 
-    whisper.cpp JSON 结构(实测前预设):
-        {"transcription": [
-            {"timestamps": {"from": "00:00:00,000", "to": "00:00:03,500"},
-             "offsets": {"from": 0, "to": 3500},
-             "text": "..."},
-            ...
-        ]}
-    offsets 单位是毫秒。
-    """
-    seg_jsons = sorted(stem_dir.glob("seg_*.json"))
-    if not seg_jsons:
-        return {}
 
-    merged_segments = []
-    last_end = 0.0
+def transcribe_seg(model: AutoModel, wav_path: Path) -> str:
+    """单段 WAV → 切成 60s 子块 → 逐一送 SenseVoice → 拼接."""
+    # 1. ffprobe 获取时长
+    r = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries",
+         "stream=duration", "-of",
+         "default=noprint_wrappers=1:nokey=1", str(wav_path)],
+        capture_output=True, text=True)
+    try:
+        duration = float(r.stdout.strip())
+    except ValueError:
+        return ""
 
-    for idx, seg_json in enumerate(seg_jsons):
-        offset = idx * SEGMENT_DURATION
-        with seg_json.open("r", encoding="utf-8") as f:
-            data = json.load(f)
+    if duration <= 0:
+        return ""
 
-        entries = data.get("transcription", [])
-        for entry in entries:
-            offsets = entry.get("offsets", {})
-            start_ms = offsets.get("from", 0)
-            end_ms = offsets.get("to", 0)
-            text = entry.get("text", "").strip()
-            if not text:
-                continue
-            start_s = start_ms / 1000.0 + offset
-            end_s = end_ms / 1000.0 + offset
-            merged_segments.append(
-                {"start": round(start_s, 3), "end": round(end_s, 3), "text": text}
-            )
-            last_end = end_s
+    # 2. 目标子块数
+    num_chunks = math.ceil(duration / CHUNK_SECONDS)
 
-    return {
-        "stem": stem_dir.name,
-        "duration_seconds": round(last_end, 2),
-        "segment_count": len(seg_jsons),
-        "segments": merged_segments,
-    }
+    # 3. 把大 WAV 一次性切成子块
+    TMP_DIR.mkdir(parents=True, exist_ok=True)
+    base = wav_path.stem
+    pattern = str(TMP_DIR / f"{base}_chunk_%03d.wav")
+    subprocess.run([
+        "ffmpeg", "-y", "-i", str(wav_path),
+        "-f", "segment", "-segment_time", str(CHUNK_SECONDS),
+        "-reset_timestamps", "1",
+        "-c", "copy", "-loglevel", "error",
+        pattern,
+    ], capture_output=True)
+
+    # 4. 逐一推理
+    chunks = []
+    for i in range(num_chunks):
+        chunk_path = TMP_DIR / f"{base}_chunk_{i:03d}.wav"
+        if not chunk_path.exists():
+            continue
+        result = model.generate(
+            input=str(chunk_path),
+            language="zh",
+            text_norm="woitn",
+        )
+        raw = result[0].get("text", "")
+        chunks.append(strip_tokens(raw))
+        os.unlink(chunk_path)
+
+    return " ".join(chunks)
+
+
+def transcribe_stem(model: AutoModel, stem_dir: Path, out_path: Path) -> bool:
+    """转录一个 stem 的所有 wav 段,合并输出。返回 True=新转录。"""
+    if out_path.exists() and out_path.stat().st_size > 0:
+        print(f"  [skip] {out_path.name}")
+        return False
+
+    wav_files = sorted(stem_dir.glob("seg_*.wav"))
+    if not wav_files:
+        print(f"  [warn] {stem_dir.name} 下没有 wav")
+        return False
+
+    segments = []
+    for wav in wav_files:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries",
+             "stream=duration", "-of",
+             "default=noprint_wrappers=1:nokey=1", str(wav)],
+            capture_output=True, text=True)
+        dur_str = r.stdout.strip()[:6]
+
+        chunks = 1
+        try:
+            d = float(r.stdout.strip())
+            chunks = max(1, math.ceil(d / CHUNK_SECONDS))
+        except ValueError:
+            pass
+
+        print(f"  [run]  {wav.name} (~{dur_str}s, {chunks} 子块)", end="", flush=True)
+
+        text = transcribe_seg(model, wav)
+        segments.append({"seq": len(segments), "seg_name": wav.stem, "text": text})
+        print(f" → {len(text)} 字")
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8") as f:
+        json.dump({
+            "stem": stem_dir.name,
+            "model": "SenseVoiceSmall",
+            "chunk_seconds": CHUNK_SECONDS,
+            "num_segments": len(segments),
+            "segments": segments,
+            "text_joined": "\n".join(s["text"] for s in segments),
+        }, f, ensure_ascii=False, indent=2)
+
+    total_chars = sum(len(s["text"]) for s in segments)
+    print(f"  [done] → {out_path.name} ({len(segments)} 段, {total_chars} 字)")
+    return True
 
 
 def main() -> None:
     if not INPUT_DIR.exists():
-        print(f"ERROR: {INPUT_DIR} 不存在,先跑 extract_audio.py", file=sys.stderr)
-        sys.exit(1)
-
-    if not MODEL_PATH.exists():
-        print(f"ERROR: 模型不存在: {MODEL_PATH}", file=sys.stderr)
+        print(f"ERROR: {INPUT_DIR} 不存在", file=sys.stderr)
         sys.exit(1)
 
     stem_dirs = sorted([d for d in INPUT_DIR.iterdir() if d.is_dir()])
@@ -146,38 +155,27 @@ def main() -> None:
         print(f"ERROR: {INPUT_DIR} 下没有子目录", file=sys.stderr)
         sys.exit(1)
 
-    print(f"[transcribe] 输入: {INPUT_DIR}")
-    print(f"[transcribe] 输出: {OUTPUT_DIR}")
-    print(f"[transcribe] 模型: {MODEL_PATH.name}")
-    print(f"[transcribe] 子目录: {len(stem_dirs)}")
-    print()
-
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    for stem_dir in stem_dirs:
-        wav_files = sorted(stem_dir.glob("seg_*.wav"))
-        if not wav_files:
-            print(f"[warn] {stem_dir.name} 下没有 wav,跳过")
-            continue
+    model = build_model()
+    print(f"[transcribe] 输入: {INPUT_DIR}")
+    print(f"[transcribe] 输出: {OUTPUT_DIR}")
+    print(f"[transcribe] 子块: {CHUNK_SECONDS}s/块, 缓存: {TMP_DIR}")
+    print(f"[transcribe] 待处理: {len(stem_dirs)} 个 stem")
+    print()
 
-        out_dir = OUTPUT_DIR / stem_dir.name
-        print(f"[stem] {stem_dir.name} ({len(wav_files)} 段)")
+    try:
+        for stem_dir in stem_dirs:
+            out_path = OUTPUT_DIR / f"{stem_dir.name}.json"
+            wav_files = sorted(stem_dir.glob("seg_*.wav"))
+            print(f"[stem] {stem_dir.name} ({len(wav_files)} 段)")
+            transcribe_stem(model, stem_dir, out_path)
+            print()
 
-        for wav in wav_files:
-            transcribe_one_segment(wav, out_dir)
-
-        merged = merge_segments(out_dir)
-        if merged:
-            merged_path = OUTPUT_DIR / f"{stem_dir.name}.json"
-            with merged_path.open("w", encoding="utf-8") as f:
-                json.dump(merged, f, ensure_ascii=False, indent=2)
-            print(
-                f"  [merge] → {merged_path.name} "
-                f"({merged['duration_seconds']:.0f}s, {len(merged['segments'])} 句)"
-            )
-        print()
-
-    print("[transcribe] 全部完成。")
+        print("[transcribe] 全部完成。")
+    finally:
+        if TMP_DIR.exists():
+            shutil.rmtree(TMP_DIR)
 
 
 if __name__ == "__main__":
