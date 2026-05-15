@@ -106,7 +106,7 @@ EMOTION_PATTERNS = {
     "开心/轻快": [re.compile(r"(哈哈|嘿嘿|嘻嘻|笑|乐|开心|快乐|爽)")],
     "愤怒/激动": [re.compile(r"(气|烦|滚|爬|闭嘴|尼玛|卧槽|我靠|草)")],
     "慵懒/摆烂": [re.compile(r"(懒|困|累|摆|算了|随便|无所谓|爱咋咋|躺)")],
-    "温柔/妈味": [re.compile(r"(没事|慢慢来|别急|乖|听话|好孩子|宝|亲爱的|崽)")],
+    "温柔/安抚": [re.compile(r"(没事|慢慢来|别急|乖|听话|好孩子|宝|亲爱的|崽)")],
 }
 
 
@@ -282,13 +282,6 @@ def analyze_keywords(input_dir: Path, limit: int = 0) -> dict:
 # 分析 prompt 模板
 STYLE_ANALYSIS_SYSTEM = """你是一位语言学家和直播风格分析师。你的任务是对一位虚拟主播的直播文字记录进行风格分析。
 
-## 本场内容大致提要（来自 Gemini 自动生成）
-{notes}
-
-> ⚠️ 上述 notes 仅用于帮你**理解本场谈了什么**（主题、SC 节奏、人物提及等）。
-> notes 里的主观判断（如"冷感御姐""高冷音色"这类语气评价）**不要采纳**，
-> 也不要让它影响你对说话风格的归纳。归纳必须只从 segments 来。
-
 ## 分析维度
 
 请从以下维度提取风格特征，每个维度给出具体例句（直接引用原文，标注时间戳）：
@@ -331,8 +324,8 @@ def sample_segments(segments: list, max_samples: int = 150) -> list:
 
 
 def build_analysis_prompt(segments: list, notes: str = "") -> str:
-    """构建发送给 LLM 的分析文本（2.1：盲测归纳，只看 segments + notes 事实上下文）。"""
-    system = STYLE_ANALYSIS_SYSTEM.format(notes=notes[:2000])
+    """构建发送给 LLM 的分析文本（2.1：盲测归纳，system 只含任务指令，notes 作为背景数据放在 user message）。"""
+    system = STYLE_ANALYSIS_SYSTEM
 
     # 构建采样文本(带时间戳)
     text_lines = []
@@ -340,7 +333,12 @@ def build_analysis_prompt(segments: list, notes: str = "") -> str:
         ts = f"[{s['start']:.0f}s]"
         text_lines.append(f"{ts} {s['text']}")
 
-    user_text = "以下是本场直播的采样字幕文本（按时间顺序排列）：\n\n" + "\n".join(text_lines)
+    user_text = ""
+    if notes and notes.strip():
+        user_text += "## 本场背景参考（来自 Gemini 自动生成，仅供参考本场聊了什么主题）\n"
+        user_text += notes[:2000] + "\n\n"
+        user_text += "> ⚠️ 上述背景仅提供事实上下文（主题、事件、人物提及）。不要采纳其中的主观评价（如语气判断、人格描述），也不要复述它的措辞。你的风格归纳必须**完全从下方的字幕文本提取证据**。\n\n"
+    user_text += "以下是本场直播的采样字幕文本（按时间顺序排列）：\n\n" + "\n".join(text_lines)
     return system, user_text
 
 
