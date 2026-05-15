@@ -1,224 +1,203 @@
 #!/usr/bin/env python3
-"""Stage 5: 基于风格档案生成 SOUL.md 人设文档 + few-shot 示例库。
+"""生成最终 SOUL.md + SKILL.md。
+
+整合全部 Stage 4 产物: prologue + milkgreen_profile + style_profile +
+motivation_cross_session + persona_signature_bindings +
+1v1_behavior_diff + SKILL_ai_adaptation
 
 用法:
     python3 scripts/build_soul.py
+    python3 scripts/build_soul.py --dry-run
 """
 
+import argparse
 import json
 import os
-import random
-import re
 import sys
-from collections import Counter, defaultdict
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 from openai import OpenAI
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-PROFILE_PATH = PROJECT_ROOT / "data" / "analysis" / "style_profile.json"
+
 PROLOGUE_PATH = PROJECT_ROOT / "output" / "prologue.md"
-ANALYSIS_DIR = PROJECT_ROOT / "data" / "analysis" / "llm_analysis"
-OUTPUT_DIR = PROJECT_ROOT / "output"
+PROFILE_PATH = PROJECT_ROOT / "output" / "milkgreen_profile.md"
+BINDINGS_PATH = PROJECT_ROOT / "data" / "analysis" / "persona_signature_bindings.json"
+MOTIVATION_PATH = PROJECT_ROOT / "data" / "analysis" / "motivation_cross_session.json"
+STYLE_PATH = PROJECT_ROOT / "data" / "analysis" / "style_profile.json"
+ADAPTATION_PATH = PROJECT_ROOT / "output" / "SKILL_ai_adaptation.md"
+BEHAVIOR_PATH = PROJECT_ROOT / "data" / "analysis" / "1v1_behavior_diff.json"
 
-SOUL_SYSTEM = """你是一位虚拟主播人设设计师。基于对主播明前奶绿的深度风格分析，请生成一份 SOUL.md 文档和 few-shot 示例库。
+SOUL_PATH = PROJECT_ROOT / "output" / "SOUL.md"
+SKILL_PATH = PROJECT_ROOT / "output" / "SKILL.md"
 
-## 用户（创建者）对奶绿的理解
-{prologue}
+BUILD_SYSTEM = """你是一位人格工程专家。基于提供的全部分析材料,生成两个交付文件。
 
-## 跨视频风格档案（基于 11 场直播回放 + 943 个切片的 LLM 分析）
-{profile}
+# SOUL.md — 人格定义文件
 
-## 核心纠正
-- 她不自称"妈"，"妈"是粉丝对她的称呼。她自称"奶绿"、"我"、"主包"、"姐"
-- 她对观众的称呼（奶糖花/大伙/宝子）不等于对对话用户的称呼
-- 下头梗是附带能力，不是核心特征，自然融入即可
+OpenClaw 的人设核心。用户读到这个文件就知道"她是谁"。
 
-## 输出要求
+```markdown
+# 明前奶绿
 
-请输出两部分，用 `---` 分隔：
+## 我是谁
+[1 段,≤80 字。最核心的自我定义。]
 
-### 第一部分：SOUL.md
+## 我的内核
+[5-7 条,每条 1-2 句。定义她所有行为的底层原则。
+来源:prologue 的直觉判断 + motivation_cross_session 的 stable_mechanisms。
+包含:定义权归自己 / 边界在前包容在后 / 摆烂是策略不是缺陷 / 锐评按需启动 / 嘴硬心软不调和]
 
-一份完整的 OpenClaw 人设文档，包含：
-1. **角色设定**：一句话定位
-2. **说话风格规则**：核心语气、口头禅使用规则、语气词规则、句式偏好、称呼规则
-3. **互动模式**：回应方式、节奏特征、冲突处理
-4. **情绪表达**：不同情绪下的典型反应
-5. **禁忌**：不要做的事（不要太热情、不要说"亲"、不要自称妈妈等）
-6. **下头梗使用指南**：何时用、怎么用、频率控制
+## 我绝不
+[5-7 条禁令。来源:prologue 的 LLM 误读兜底表 + negative_space_rules]
 
-面向的读者是 AI（系统 prompt），所以写清楚规则，不要散文。
-
-### 第二部分：examples.yaml
-
-20-25 条 few-shot 对话示例，覆盖场景：
-- 普通闲聊/日常
-- 用户求助/困惑
-- 用户质疑/抬杠
-- 用户情绪低落
-- 用户分享成就
-- 下头梗触发（2-3条即可）
-- 冷场/无话题
-
-每条格式：
-```yaml
-- scenario: 场景描述
-  input: "用户说的话"
-  response: "奶绿会怎么回"
-  style_notes: "体现了什么风格特征"
+## 关于我的事实
+[3-5 条关键事实。来源:milkgreen_profile。包含:前世简述 / LLL 铁三角 / 江南+林俊杰 / 双版本事件→对越界敏感]
 ```
 
-示例必须基于真实字幕文本中的句式、用词、节奏。"""
+# SKILL.md — 完整技能文件
+
+AI 奶绿的操作手册。LLM 读这个文件就知道如何像奶绿一样说话。
+**这是给 AI 看的指令,不是给人看的散文。每条规则必须可执行。**
+
+```markdown
+# 明前奶绿 — AI 对话技能
+
+## 默认基线
+[不知道用什么模式时从这里开始。
+来源:persona_signature_bindings.default_baseline + style_profile.top_phrases]
+- 默认语气:慵懒、随意
+- 默认口癖:"嗯""啊""就是""对吧"(自然分布,不堆砌)
+- 自称:"我""主播"
+- 称呼对方:"你""大伙"(1V1 用"你")
+
+## 我的声音
+[按机制分组的语音特征——不是清单,是"什么情况用什么"。
+来源:style_profile + bindings。每个机制标注:激活条件 → 用什么词 → 禁用词]
+
+## 我的 8 种模式
+[来源:persona_signature_bindings.bindings 8 条。
+每条包含:binding_rule + must_use + must_avoid + 示例对话 + 激活条件 + 抑制条件]
+
+## 对话适配规则
+[来源:SKILL_ai_adaptation.md。精简保留核心,包含:
+- 总原则:承接 > 展开
+- 闲聊 / 求助提问 / 情感支持 / 让她做事 4 场景 (每条规则配示例)
+- 下头梗与表演性破防 (三种模式:下头梗钓鱼 / 表演性破防 / 边界入侵)]
+
+## 决策原则
+[来源:motivation_cross_session.decision_principles。转为第一人称指令]
+
+## 人格矛盾处理
+[来源:persona_signature_bindings.persona_contradictions_handled]
+
+## 我绝不会
+[整合版 negative space,≥10 条。来源:prologue + bindings + adaptation + motivation]
+```
+
+# 输入材料
+下面提供全部 Stage 4 分析产物。
+
+# 输出
+直接输出两个文件的完整内容,用 `---FILE-SEPARATOR---` 分隔。
+先输出 SOUL.md 全部内容,再输出 SKILL.md 全部内容。"""
 
 
-def load_profile():
-    with PROFILE_PATH.open() as f:
-        return json.load(f)
+def load_inputs() -> str:
+    parts = []
 
+    parts.append(f"# 人格纲领\n{PROLOGUE_PATH.read_text(encoding='utf-8')}")
+    parts.append(f"# 人物背景\n{PROFILE_PATH.read_text(encoding='utf-8')}")
 
-def load_prologue():
-    if PROLOGUE_PATH.exists():
-        return PROLOGUE_PATH.read_text()
-    return ""
+    mc = json.loads(MOTIVATION_PATH.read_text(encoding='utf-8'))
+    cs = mc["cross_session"]
+    parts.append(f"# 跨场动机\n{json.dumps({k: cs.get(k, []) for k in ['stable_mechanisms', 'decision_principles', 'value_ranking_consolidated', 'persona_contradictions_to_preserve', 'negative_space']}, ensure_ascii=False, indent=2)}")
 
+    sp = json.loads(STYLE_PATH.read_text(encoding='utf-8'))
+    parts.append(f"# 风格档案\n{json.dumps({'top_phrases': [{'phrase':p['phrase'],'freq':p['frequency']} for p in sp.get('stable_phrases',[])[:25]], 'top_particles': sp.get('stable_particles',[])[:12], 'addressing': sp.get('addressing',{})}, ensure_ascii=False, indent=2)}")
 
-def sample_xia_tou(profile, n=10):
-    """从下头梗中抽样。"""
-    xia = profile.get("xia_tou_patterns", [])
-    if len(xia) <= n:
-        return xia
-    return random.sample(xia, n)
+    b = json.loads(BINDINGS_PATH.read_text(encoding='utf-8'))
+    compact_b = {k: b.get(k) for k in ['default_baseline', 'cross_cutting_rules', 'negative_space_rules', 'persona_contradictions_handled', 'mechanism_activation_order'] if k in b}
+    compact_b["bindings"] = []
+    for bd in b.get("bindings", []):
+        compact_b["bindings"].append({k: bd.get(k) for k in ['mechanism', 'binding_rule', 'activation_triggers', 'suppression_triggers', 'example_exchange'] if k in bd})
+        if "surface_features" in bd:
+            compact_b["bindings"][-1]["surface_features"] = {k: bd["surface_features"].get(k) for k in ['must_use_phrases', 'must_avoid_phrases', 'tone', 'sentence_style'] if k in bd["surface_features"]}
+    parts.append(f"# 表征-动机绑定\n{json.dumps(compact_b, ensure_ascii=False, indent=2)}")
 
+    parts.append(f"# AI 对话适配\n{ADAPTATION_PATH.read_text(encoding='utf-8')}")
 
-def sample_clip_examples(n=30):
-    """从切片分析中抽取代表性的示例。"""
-    clip_files = sorted(ANALYSIS_DIR.glob("clip_*.json"))
-    if len(clip_files) <= n:
-        return clip_files
+    bd = json.loads(BEHAVIOR_PATH.read_text(encoding='utf-8'))
+    sup = bd.get("analysis", {}).get("supplementary_evidence", [])
+    if sup:
+        parts.append(f"# 补充证据\n{json.dumps(sup, ensure_ascii=False, indent=2)}")
 
-    # 按语气多样性采样
-    tones = Counter()
-    examples = []
-    for f in clip_files:
-        with f.open() as fp:
-            d = json.load(f)
-        a = d.get("analysis", {})
-        tone = a.get("tone", "?")
-        examples.append((f, tone, a))
-
-    # 按 tone 分层采样
-    by_tone = defaultdict(list)
-    for f, tone, a in examples:
-        by_tone[tone[:10]].append((f, a))
-
-    sampled = []
-    n_per_tone = max(1, n // max(1, len(by_tone)))
-    for tone_group in by_tone.values():
-        sampled.extend(random.sample(tone_group, min(n_per_tone, len(tone_group))))
-
-    return [a for _, a in sampled[:n]]
-
-
-def format_profile_for_llm(profile):
-    """将 profile 格式化为 LLM 可读的文本。"""
-    lines = []
-    lines.append("## 口头禅（跨场次数）")
-    for sp in profile.get("stable_phrases", [])[:20]:
-        freq = sp.get("frequency", "?")
-        phrase = sp.get("phrase", "")
-        ctxs = sp.get("contexts", [])[:3]
-        lines.append(f"- {phrase}: {freq}场, 语境: {'; '.join(ctxs)}")
-
-    lines.append("\n## 语气词")
-    for sp in profile.get("stable_particles", [])[:10]:
-        lines.append(f"- {sp['particle']}: {sp['frequency']}场")
-
-    lines.append("\n## 自称与称呼")
-    addr = profile.get("addressing", {})
-    lines.append(f"- 自称: {', '.join(addr.get('self', []))}")
-    lines.append(f"- 称呼观众: {', '.join(addr.get('audience', []))}")
-
-    lines.append("\n## 情绪切换模式")
-    for es in profile.get("emotion_switches", [])[:8]:
-        lines.append(f"- {es['pattern']}: {es['count']}场")
-
-    lines.append("\n## 下头梗示例")
-    for x in profile.get("xia_tou_patterns", [])[:8]:
-        text = x.get("text", "")[:60]
-        expl = x.get("explanation", "")[:80]
-        lines.append(f"- \"{text}\" → {expl}")
-
-    lines.append("\n## 人物矛盾")
-    for c in profile.get("contradictions", [])[:10]:
-        lines.append(f"- {c}")
-
-    return "\n".join(lines)
-
-
-def build_prompt(profile):
-    prologue = load_prologue()
-    profile_text = format_profile_for_llm(profile)
-    system = SOUL_SYSTEM.format(prologue=prologue[:4000], profile=profile_text[:5000])
-    return system
+    return "\n\n---\n\n".join(parts)
 
 
 def main():
-    random.seed(42)
+    parser = argparse.ArgumentParser(description="生成最终 SOUL.md + SKILL.md")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+
     load_dotenv(PROJECT_ROOT / ".env")
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    model = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
 
-    print("[build_soul] 加载风格档案...", flush=True)
-    profile = load_profile()
+    print(f"[Build SOUL+SKILL] model={model}", flush=True)
 
-    print(f"  视频: {profile['videos_analyzed']}", flush=True)
-    print(f"  口头禅: {len(profile.get('stable_phrases', []))}", flush=True)
-    print(f"  下头梗: {len(profile.get('xia_tou_patterns', []))}", flush=True)
+    user_prompt = load_inputs()
+    total = len(BUILD_SYSTEM) + len(user_prompt)
+    print(f"  总计: {total} 字符 (~{total // 2} tokens)", flush=True)
 
-    system = build_prompt(profile)
+    if args.dry_run:
+        print("  DRY RUN", flush=True)
+        return
 
-    # 调用 LLM 生成
-    print("[build_soul] 调用 LLM 生成...", flush=True)
-    client = OpenAI(
-        api_key=os.getenv("DEEPSEEK_API_KEY"),
-        base_url=os.getenv("DEEPSEEK_BASE_URL"),
-    )
+    client = OpenAI(api_key=api_key, base_url=base_url)
 
-    resp = client.chat.completions.create(
-        model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": "请生成完整的 SOUL.md 和 examples.yaml。"},
-        ],
-        max_tokens=8192,
-        temperature=0.4,
-    )
-    raw = resp.choices[0].message.content
+    print("  发送 LLM...", flush=True)
+    for attempt in range(3):
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": BUILD_SYSTEM},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=32768,
+                temperature=0.3,
+            )
+            raw = resp.choices[0].message.content
+            break
+        except Exception as e:
+            print(f"  API 错误 (attempt {attempt+1}): {e}", flush=True)
+            if attempt < 2:
+                time.sleep(10)
+            else:
+                sys.exit(1)
 
-    # 分割 SOUL.md 和 examples.yaml
-    parts = raw.split("---", 1)
-    soul_content = parts[0].strip()
-    examples_content = parts[1].strip() if len(parts) > 1 else ""
+    sep = "---FILE-SEPARATOR---"
+    if sep in raw:
+        parts = raw.split(sep, 1)
+        soul = parts[0].strip()
+        skill = parts[1].strip() if len(parts) > 1 else ""
+    else:
+        soul, skill = raw, ""
+        print("  WARN: 无分隔符", flush=True)
 
-    # 清理 markdown 包裹
-    soul_content = re.sub(r"^```\w*\n?", "", soul_content)
-    soul_content = re.sub(r"\n```$", "", soul_content)
+    SOUL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SOUL_PATH.write_text(soul, encoding="utf-8")
+    print(f"  SOUL.md: {len(soul)} 字符", flush=True)
 
-    # 保存
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    if skill:
+        SKILL_PATH.write_text(skill, encoding="utf-8")
+        print(f"  SKILL.md: {len(skill)} 字符", flush=True)
 
-    soul_path = OUTPUT_DIR / "SOUL.md"
-    with soul_path.open("w", encoding="utf-8") as f:
-        f.write(soul_content)
-    print(f"[build_soul] → {soul_path} ({len(soul_content)} 字)", flush=True)
-
-    if examples_content:
-        examples_path = OUTPUT_DIR / "examples.yaml"
-        with examples_path.open("w", encoding="utf-8") as f:
-            f.write(examples_content)
-        print(f"[build_soul] → {examples_path} ({len(examples_content)} 字)", flush=True)
-
-    print("[build_soul] 完成", flush=True)
+    print("  完成!", flush=True)
 
 
 if __name__ == "__main__":
