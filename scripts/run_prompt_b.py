@@ -22,7 +22,6 @@ from openai import OpenAI
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MOTIVATION_DIR = PROJECT_ROOT / "data" / "analysis" / "motivation"
 OUTPUT_PATH = PROJECT_ROOT / "data" / "analysis" / "motivation_cross_session.json"
-FACTS_PATH = PROJECT_ROOT / "output" / "milkgreen_facts.md"
 
 # ── Prompt B ──────────────────────────────────────
 
