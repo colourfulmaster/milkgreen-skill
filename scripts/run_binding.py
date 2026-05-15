@@ -25,7 +25,6 @@ from openai import OpenAI
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STYLE_PROFILE_PATH = PROJECT_ROOT / "data" / "analysis" / "style_profile.json"
 MOTIVATION_CROSS_PATH = PROJECT_ROOT / "data" / "analysis" / "motivation_cross_session.json"
-PROLOGUE_PATH = PROJECT_ROOT / "output" / "prologue.md"
 OUTPUT_PATH = PROJECT_ROOT / "data" / "analysis" / "persona_signature_bindings.json"
 
 BINDING_SYSTEM = """你是一位人格工程专家。你的任务是将一位主播的"表面特征"和"底层动机"焊接起来，
@@ -52,9 +51,8 @@ BINDING_SYSTEM = """你是一位人格工程专家。你的任务是将一位主
 
 # 输入
 你会收到:
-1. 主播人格纲领 (prologue)
-2. 表征层数据 (style_profile 摘要)
-3. 动机层数据 (motivation_cross_session: 稳定机制 + 决策原则 + negative space)
+1. 表征层数据 (style_profile 摘要)
+2. 动机层数据 (motivation_cross_session: 稳定机制 + 决策原则 + negative space)
 
 # 输出格式 (JSON, 不要 markdown 包裹)
 {
@@ -145,12 +143,9 @@ def load_compact_motivation() -> dict:
     }
 
 
-def build_user_prompt(style: dict, motivation: dict, prologue: str) -> str:
-    """构建 binding 的 user prompt。"""
-    return f"""# 主播人格纲领
-{prologue}
-
-# 表征层 — 她说什么 (style_profile)
+def build_user_prompt(style: dict, motivation: dict) -> str:
+    """构建 binding 的 user prompt（2.1：只依赖 Stage 4.2/4.4 数据产物，不依赖人工纲领）。"""
+    return f"""# 表征层 — 她说什么 (style_profile)
 {json.dumps(style, ensure_ascii=False, indent=2)}
 
 # 动机层 — 她为什么说 (motivation_cross_session)
@@ -174,11 +169,10 @@ def main():
 
     print(f"[Binding] model={model} | key={api_key[:12]}...", flush=True)
 
-    prologue = PROLOGUE_PATH.read_text(encoding="utf-8")
     style = load_compact_style_profile()
     motivation = load_compact_motivation()
 
-    user_prompt = build_user_prompt(style, motivation, prologue)
+    user_prompt = build_user_prompt(style, motivation)
     total_chars = len(BINDING_SYSTEM) + len(user_prompt)
     print(f"  系统 prompt: {len(BINDING_SYSTEM)} 字符", flush=True)
     print(f"  用户 prompt: {len(user_prompt)} 字符", flush=True)
