@@ -150,7 +150,10 @@ def build_input_context() -> str:
 # 表征-动机绑定
 {json.dumps(compact_b, ensure_ascii=False, indent=2)}
 
-# 主播人格纲领
+# 产品规格 (clone spec)
+# 以下是用户对 AI 奶绿的意图定义——描述用户希望她是什么样的人。
+# 这不是数据归纳的结果，而是产品方向。用它来校准最终输出的"味道"，
+# 但具体的行为规则必须来自上方的 Prompt D 行为差异 + 表征-动机绑定数据。
 {prologue}
 
 ---
