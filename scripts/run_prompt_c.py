@@ -197,7 +197,6 @@ def run_prompt_c(
     with out_path.open("w", encoding="utf-8") as f:
         json.dump({
             "bvid": bvid,
-            "notes": notes,
             "samples": len(sampled),
             "total_segments": len(segments),
             "extraction": result,
