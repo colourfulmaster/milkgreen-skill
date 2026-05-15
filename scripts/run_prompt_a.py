@@ -36,8 +36,7 @@ from openai import OpenAI
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CLEANED_DIR = PROJECT_ROOT / "data" / "cleaned"
 OUTPUT_DIR = PROJECT_ROOT / "data" / "analysis" / "motivation"
-PROLOGUE_PATH = PROJECT_ROOT / "output" / "prologue.md"
-PROFILE_PATH = PROJECT_ROOT / "output" / "milkgreen_profile.md"
+FACTS_PATH = PROJECT_ROOT / "output" / "milkgreen_facts.md"
 STYLE_PROFILE_PATH = PROJECT_ROOT / "data" / "analysis" / "style_profile.json"
 PROMPTS_PATH = PROJECT_ROOT / "motivation_prompts.md"
 
@@ -56,10 +55,9 @@ PROMPT_A_SYSTEM = """你正在分析虚拟主播"明前奶绿"的一场直播转
 
 # 输入数据说明
 下面你会收到:
-1. 主播人格纲领 (prologue) — 项目负责人对这个人的直觉理解,分析时以此为准
-2. 人物背景档案 — 事实信息
-3. 风格档案摘要 — 来自之前 LLM 分析的跨场表面特征汇总,仅供参考
-4. 本场直播字幕 — 带时间戳和情绪标注的 segments 列表
+1. 事实背景 (facts) — 纯事实信息(身份/人际关系/重大事件/粉丝文化术语),仅供识别人物/关系/世界观参考,**不要据此预判她的动机**
+2. 风格档案摘要 — 来自之前 LLM 分析的跨场表面特征汇总,仅供参考
+3. 本场直播字幕 — 带时间戳和情绪标注的 segments 列表
 
 # 输出格式(严格 JSON,不要 markdown 代码块包裹)
 {
@@ -120,10 +118,9 @@ PROMPT_A_SYSTEM = """你正在分析虚拟主播"明前奶绿"的一场直播转
 开始分析。"""
 
 
-def load_context() -> Tuple[str, str, str]:
-    """加载三个上下文文件: prologue, profile, style_profile_summary."""
-    prologue = PROLOGUE_PATH.read_text(encoding="utf-8") if PROLOGUE_PATH.exists() else ""
-    profile = PROFILE_PATH.read_text(encoding="utf-8") if PROFILE_PATH.exists() else ""
+def load_context() -> Tuple[str, str]:
+    """加载上下文文件: facts(纯事实背景), style_profile_summary."""
+    facts = FACTS_PATH.read_text(encoding="utf-8") if FACTS_PATH.exists() else ""
 
     style_summary = ""
     if STYLE_PROFILE_PATH.exists():
@@ -142,7 +139,7 @@ def load_context() -> Tuple[str, str, str]:
             "emotion_switches": switches,
         }, ensure_ascii=False, indent=2)
 
-    return prologue, profile, style_summary
+    return facts, style_summary
 
 
 def load_bv_files() -> list:
@@ -175,13 +172,10 @@ def build_data_text(segments: list) -> str:
     return "\n".join(lines)
 
 
-def build_user_prompt(data_text: str, prologue: str, profile: str, style_summary: str) -> str:
+def build_user_prompt(data_text: str, facts: str, style_summary: str) -> str:
     """构建 Prompt A 的 user message。"""
-    return f"""# 主播人格纲领 (prologue)
-{prologue}
-
-# 人物背景档案
-{profile}
+    return f"""# 事实背景 (纯事实,仅供识别人物/关系/世界观参考)
+{facts}
 
 # 风格档案摘要 (来自跨场表面特征统计,仅供参考,不要复述)
 {style_summary}
@@ -196,8 +190,7 @@ def build_user_prompt(data_text: str, prologue: str, profile: str, style_summary
 
 def run_prompt_a(
     bv_path: Path,
-    prologue: str,
-    profile: str,
+    facts: str,
     style_summary: str,
     client: OpenAI,
     model: str,
@@ -224,12 +217,12 @@ def run_prompt_a(
 
     if dry_run:
         print(f"  [{bvid}] DRY RUN — 不调用 API,仅打印 prompt 长度", flush=True)
-        user_prompt = build_user_prompt(data_text, prologue, profile, style_summary)
+        user_prompt = build_user_prompt(data_text, facts, style_summary)
         print(f"    系统 prompt: {len(PROMPT_A_SYSTEM)} 字符", flush=True)
         print(f"    用户 prompt: {len(user_prompt)} 字符", flush=True)
         return None
 
-    user_prompt = build_user_prompt(data_text, prologue, profile, style_summary)
+    user_prompt = build_user_prompt(data_text, facts, style_summary)
 
     max_retries = 3
     for attempt in range(max_retries):
@@ -314,8 +307,8 @@ def main():
           f"key={api_key[:12]}... | sample={args.sample}", flush=True)
 
     # 加载上下文 (只需一次)
-    prologue, profile, style_summary = load_context()
-    print(f"  上下文: prologue={len(prologue)}字符, profile={len(profile)}字符, "
+    facts, style_summary = load_context()
+    print(f"  上下文: facts={len(facts)}字符, "
           f"style_summary={len(style_summary)}字符", flush=True)
 
     # 收集文件
@@ -341,8 +334,7 @@ def main():
         print(f"\n[{i+1}/{len(my_files)}] {bv_path.stem}", flush=True)
         result = run_prompt_a(
             bv_path=bv_path,
-            prologue=prologue,
-            profile=profile,
+            facts=facts,
             style_summary=style_summary,
             client=client,
             model=model,
