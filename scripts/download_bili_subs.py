@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
-"""从 B站 AI字幕接口拉取字幕,输出与 whisper 转录一致的 JSON。
+"""[开发期测试脚本 / 已弃用于生产]
 
+从 B站 AI字幕接口拉取字幕,输出与 whisper 转录一致的 JSON。
 直接走 B站 player API + aisubtitle CDN,无需播放视频。
+
+---
+**重要**:本脚本写死了单个 BVID("BV14KDtBSEnS",非奶绿内容),
+仅用于早期验证"B站 AI 字幕通道是否通畅"。生产中按合集批量抓字幕
+请用 scripts/download_collection_subs.py。
+
+本脚本的输出文件名 `bili_ai_P*.json` 不符合奶绿数据命名规范
+(BV* 或 *_BiliBili_*),会被 stage 3/4 的白名单过滤,不会进入分析。
+保留本脚本仅用于 AI 字幕协议层的回归测试,运行前请清理上一次输出。
 """
 
 import json
