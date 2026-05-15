@@ -28,8 +28,6 @@ from openai import OpenAI
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CLEANED_DIR = PROJECT_ROOT / "data" / "cleaned"
 OUTPUT_DIR = PROJECT_ROOT / "data" / "analysis" / "1v1_clips"
-PROLOGUE_PATH = PROJECT_ROOT / "output" / "prologue.md"
-
 PROMPT_C_SYSTEM = """你正在从虚拟主播"明前奶绿"的一场直播转录里,**提取所有她切换到"对一个具体的人说话"模式的片段**。
 这些片段是稀缺的——绝大多数时间她是在对一群匿名观众广播。我们要的是她**短暂 1V1 化**的瞬间。
 
@@ -95,12 +93,6 @@ PROMPT_C_SYSTEM = """你正在从虚拟主播"明前奶绿"的一场直播转录
 开始分析。"""
 
 
-def load_prologue() -> str:
-    if PROLOGUE_PATH.exists():
-        return PROLOGUE_PATH.read_text(encoding="utf-8")
-    return ""
-
-
 def load_bv_files() -> list:
     files = sorted(CLEANED_DIR.glob("BV*.json"))
     return [f for f in files if not f.name.startswith("clip_")]
@@ -127,12 +119,9 @@ def build_data_text(segments: list) -> str:
     return "\n".join(lines)
 
 
-def build_user_prompt(data_text: str, prologue: str, notes: str) -> str:
-    header = f"# 主播背景\n{prologue}\n\n" if prologue else ""
-    return f"""{header}# 本场直播背景
-{notes}
-
-# 本场直播字幕 (带时间戳 + 情绪标注)
+def build_user_prompt(data_text: str) -> str:
+    """构建 Prompt C 的 user message（2.1：分类抽取不需要背景上下文，纯看 segments 格式）。"""
+    return f"""# 本场直播字幕 (带时间戳 + 情绪标注)
 {data_text}
 
 ---
@@ -142,7 +131,6 @@ def build_user_prompt(data_text: str, prologue: str, notes: str) -> str:
 
 def run_prompt_c(
     bv_path: Path,
-    prologue: str,
     client: OpenAI,
     model: str,
     max_samples: int = 800,
@@ -161,17 +149,16 @@ def run_prompt_c(
 
     sampled = sample_segments(segments, max_samples)
     data_text = build_data_text(sampled)
-    notes = data.get("notes", "")
 
     print(f"  [{bvid}] 采样 {len(sampled)}/{len(segments)} 段, 数据 {len(data_text)} 字符", flush=True)
 
     if dry_run:
-        user_prompt = build_user_prompt(data_text, prologue, notes)
+        user_prompt = build_user_prompt(data_text)
         print(f"    系统 prompt: {len(PROMPT_C_SYSTEM)} 字符", flush=True)
         print(f"    用户 prompt: {len(user_prompt)} 字符", flush=True)
         return None
 
-    user_prompt = build_user_prompt(data_text, prologue, notes)
+    user_prompt = build_user_prompt(data_text)
 
     for attempt in range(3):
         try:
@@ -249,8 +236,6 @@ def main():
     print(f"[Prompt C] Worker {worker_id}/{total_workers} | model={model} | "
           f"key={api_key[:12]}... | sample={args.sample}", flush=True)
 
-    prologue = load_prologue()
-
     all_files = load_bv_files()
     if args.bvid:
         all_files = [f for f in all_files if f.stem == args.bvid]
@@ -272,7 +257,6 @@ def main():
         print(f"\n[{i+1}/{len(my_files)}] {bv_path.stem}", flush=True)
         result = run_prompt_c(
             bv_path=bv_path,
-            prologue=prologue,
             client=client,
             model=model,
             max_samples=args.sample,
