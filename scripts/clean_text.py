@@ -26,6 +26,24 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 INPUT_DIR = PROJECT_ROOT / "data" / "transcripts"
 OUTPUT_DIR = PROJECT_ROOT / "data" / "cleaned"
 
+
+# ── 输入白名单 ──────────────────────────────────────
+# 防止开发期测试残留(如 bili_ai_P*.json)混入正式数据。
+# 只接受符合奶绿数据命名规范的 stem。
+
+def is_target_stem(stem: str) -> bool:
+    """判断 stem 是否为奶绿真实数据。匹配以下三类命名:
+    - 切片视频 BVID:BV16BiiBfE8P / BV16BiiBfE8P_P1
+    - import_clips.py 输出:clip_BV*
+    - 直播回放 yt-dlp 命名:含 `_BiliBili_` 或前缀 `NA_BiliBili_`
+    其他(如 bili_ai_*、临时测试文件)一律拒绝。
+    """
+    if stem.startswith("BV") or stem.startswith("clip_BV"):
+        return True
+    if "_BiliBili_" in stem:
+        return True
+    return False
+
 # ── 配置 ───────────────────────────────────────────
 
 MIN_SEG_DURATION = 2.0   # 低于此秒数视为碎片
@@ -231,8 +249,13 @@ def main():
 
     INPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 收集文件
-    json_files = sorted(INPUT_DIR.glob("*.json"))
+    # 收集文件(过滤非奶绿数据)
+    all_json = sorted(INPUT_DIR.glob("*.json"))
+    json_files = [f for f in all_json if is_target_stem(f.stem)]
+    skipped = [f.stem for f in all_json if not is_target_stem(f.stem)]
+    if skipped:
+        print(f"[clean] 已过滤 {len(skipped)} 个非奶绿命名文件: {skipped[:5]}{'...' if len(skipped) > 5 else ''}",
+              flush=True)
     if args.bvid:
         json_files = [INPUT_DIR / f"{args.bvid}.json"]
         if not json_files[0].exists():

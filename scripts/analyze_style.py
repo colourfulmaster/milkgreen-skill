@@ -159,9 +159,24 @@ def tag_segment(seg: dict) -> dict:
     return tags
 
 
+def _is_target_stem(stem: str) -> bool:
+    """白名单:只接受奶绿真实数据,过滤开发期测试残留(如 bili_ai_*)。
+    与 scripts/clean_text.py 的 is_target_stem 保持一致。
+    """
+    if stem.startswith("BV") or stem.startswith("clip_BV"):
+        return True
+    if "_BiliBili_" in stem:
+        return True
+    return False
+
+
 def analyze_keywords(input_dir: Path, limit: int = 0) -> dict:
     """对所有清洗后文件做关键词标注,返回全局统计。"""
-    files = sorted(input_dir.glob("*.json"))
+    all_files = sorted(input_dir.glob("*.json"))
+    files = [f for f in all_files if _is_target_stem(f.stem)]
+    if len(files) < len(all_files):
+        skipped = [f.stem for f in all_files if not _is_target_stem(f.stem)]
+        print(f"[step1] 已过滤 {len(skipped)} 个非奶绿命名文件: {skipped[:5]}", flush=True)
     if limit:
         files = files[:limit]
 
@@ -443,19 +458,26 @@ def run_llm_analysis(limit: int = 0) -> None:
     profile = load_profile()
     load_dotenv(PROJECT_ROOT / ".env")
 
-    client = OpenAI(
-        api_key=os.getenv("DEEPSEEK_API_KEY"),
-        base_url=os.getenv("DEEPSEEK_BASE_URL"),
-    )
+    # 多 worker 支持: 从 .env 读取 API key 数组
+    api_keys_str = os.getenv("DEEPSEEK_API_KEYS", "")
+    api_keys = [k.strip() for k in api_keys_str.split(",") if k.strip()] if api_keys_str else [os.getenv("DEEPSEEK_API_KEY")]
+    worker_id = int(os.getenv("WORKER_ID", "0"))
+    total_workers = int(os.getenv("TOTAL_WORKERS", "1"))
+    api_key = api_keys[worker_id % len(api_keys)]
+
+    client = OpenAI(api_key=api_key, base_url=os.getenv("DEEPSEEK_BASE_URL"))
 
     # 收集所有文件，直播回放优先
     live_files = sorted([f for f in CLEANED_DIR.glob("BV*.json") if not f.name.startswith("clip_")])
     clip_files = sorted(CLEANED_DIR.glob("clip_*.json"))
     all_files = live_files + clip_files
+
+    # 分片: worker_id 取模
+    all_files = [f for i, f in enumerate(all_files) if i % total_workers == worker_id]
     if limit:
         all_files = all_files[:limit]
 
-    print(f"[step2] 直播回放: {len(live_files)}, 切片: {len(clip_files)}, 合计: {len(all_files)}", flush=True)
+    print(f"[step2] Worker {worker_id}/{total_workers}: {len(live_files)}回放+{len(clip_files)}切片={len(all_files)}文件 (key:{api_key[:12]}...)", flush=True)
 
     for i, f in enumerate(all_files):
         bvid = f.stem
@@ -490,10 +512,10 @@ def run_llm_analysis(limit: int = 0) -> None:
                 text_lines.append(s["text"])
             user_text = "\n".join(text_lines)
             system = CLIP_ANALYSIS_SYSTEM.format(prologue=prologue[:1500], profile=profile[:1500], title=title)
-            max_tok = 1024
+            max_tok = 16384
         else:
             system, user_text = build_analysis_prompt(sampled, notes)
-            max_tok = 4096
+            max_tok = 16384
 
         if out_path.exists():
             with out_path.open("r", encoding="utf-8") as fp:
