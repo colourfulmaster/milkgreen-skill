@@ -543,14 +543,29 @@ def run_llm_analysis(limit: int = 0) -> None:
 
 # ── Step 3: 跨视频汇总 ────────────────────────────
 
+def load_clip_blacklist() -> set:
+    """从 clip_voice_audit.json 读取 verdict=3 脏切片 BVID 黑名单。"""
+    audit_path = OUTPUT_DIR / "clip_voice_audit.json"
+    if not audit_path.exists():
+        return set()
+    with audit_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    return set(data.get("verdict_3_list", []))
+
+
 def cross_video_synthesis() -> dict:
     """合并所有单场分析,提炼跨场次稳定特征(≥3场)。"""
+    blacklist = load_clip_blacklist()
     analysis_dir = OUTPUT_DIR / "llm_analysis"
     files = sorted(analysis_dir.glob("*.json"))
     if not files:
         print("ERROR: 无分析文件", flush=True)
         return {}
 
+    original_count = len(files)
+    files = [f for f in files if f.stem not in blacklist]
+    if len(files) < original_count:
+        print(f"[step3] 黑名单过滤: {original_count - len(files)} 个源视频音轨切片已排除", flush=True)
     print(f"[step3] 汇总 {len(files)} 场分析", flush=True)
 
     all_analyses = []
