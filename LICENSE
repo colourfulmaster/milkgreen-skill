@@ -1,0 +1,45 @@
+Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+
+Copyright (c) 2026 colourfulmaster
+
+This work is licensed under the Creative Commons Attribution-NonCommercial 4.0
+International License. To view a copy of this license, visit:
+https://creativecommons.org/licenses/by-nc/4.0/
+
+You are free to:
+  - Share — copy and redistribute the material in any medium or format
+  - Adapt — remix, transform, and build upon the material
+
+Under the following terms:
+  - Attribution (BY) — You must give appropriate credit, provide a link to the
+    license, and indicate if changes were made. You may do so in any reasonable
+    manner, but not in any way that suggests the licensor endorses you or your
+    use.
+  - NonCommercial (NC) — You may not use the material for commercial purposes.
+
+No additional restrictions — You may not apply legal terms or technological
+measures that legally restrict others from doing anything the license permits.
+
+──────────────────────────────────────────────────────────────────────────────
+
+ADDITIONAL CONTEXT (not part of the legal license, but required reading)
+
+This project documents a methodology for distilling a public Bilibili streamer's
+speaking style into LLM system prompts (SOUL.md + SKILL.md). The streamer in
+question (明前奶绿 / Mingqian Milk Green) has publicly stated:
+
+  - Her voice / audio works are commercial-use forbidden ("音声禁止商用")
+  - Non-commercial derivative creation (二次创作) is permitted
+
+This LICENSE (CC-BY-NC-4.0) aligns with that stance:
+  - You MAY use these prompts for non-commercial research, fan-made AI
+    companions, methodology study, or further derivative creation
+  - You MAY NOT use these prompts in commercial products, paid services, or
+    any monetized deployment without explicit permission from the streamer
+
+If 明前奶绿 herself, her management (if any), or Laplace-related affiliates
+request takedown, the maintainer will comply immediately.
+
+For attribution, please cite:
+  colourfulmaster/milkgreen-skill (2026). milkGreenSoul methodology.
+  https://github.com/colourfulmaster/milkgreen-skill
